@@ -25,12 +25,24 @@ export function ReceiptScanner({ onScanComplete }) {
     await scanReceiptFn(file);
   };
 
-  useEffect(() => {
-    if (scannedData && !scanReceiptLoading) {
-      onScanComplete(scannedData);
-      toast.success("Receipt scanned successfully");
-    }
-  }, [scanReceiptLoading, scannedData]);
+ 
+useEffect(() => {
+  if (scannedData && !scanReceiptLoading) {
+    // Normalize scanned receipt data
+    const newTransaction = {
+      title: scannedData.itemName || "Untitled Transaction",
+      amount: Number(scannedData.amount) || 0,
+      category: scannedData.category || "Misc",
+      type: "expense", // ensure type is set
+      date: scannedData.date ? new Date(scannedData.date) : new Date(), // fallback to today
+    };
+
+    onScanComplete(newTransaction);
+    toast.success("Receipt scanned successfully");
+  }
+}, [scanReceiptLoading, scannedData]);
+
+
 
   return (
     <div className="flex items-center gap-4">
