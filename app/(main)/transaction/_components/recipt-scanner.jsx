@@ -25,7 +25,6 @@ export function ReceiptScanner({ onScanComplete }) {
     await scanReceiptFn(file);
   };
 
- 
 useEffect(() => {
   if (scannedData && !scanReceiptLoading) {
     // Normalize scanned receipt data
@@ -41,7 +40,6 @@ useEffect(() => {
     toast.success("Receipt scanned successfully");
   }
 }, [scanReceiptLoading, scannedData]);
-
 
 
   return (
