@@ -98,12 +98,9 @@ export function AddTransactionForm({
     if (scannedData) {
       setValue("amount", scannedData.amount.toString());
       setValue("date", new Date(scannedData.date));
-      if (scannedData.description) {
-        setValue("description", scannedData.description);
-      }
-      if (scannedData.category) {
-        setValue("category", scannedData.category);
-      }
+      if (scannedData.description) setValue("description", scannedData.description);
+      if (scannedData.category) setValue("category", scannedData.category);
+      setValue("type", "EXPENSE"); // Always uppercase for consistency
       toast.success("Receipt scanned successfully");
     }
   };
@@ -130,16 +127,12 @@ export function AddTransactionForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-      {/* Receipt Scanner - Only show in create mode */}
       {!editMode && <ReceiptScanner onScanComplete={handleScanComplete} />}
 
-      {/* Type */}
+      {/* Transaction Type */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Type</label>
-        <Select
-          onValueChange={(value) => setValue("type", value)}
-          defaultValue={type}
-        >
+        <Select onValueChange={(value) => setValue("type", value)} defaultValue={type}>
           <SelectTrigger>
             <SelectValue placeholder="Select type" />
           </SelectTrigger>
@@ -148,24 +141,15 @@ export function AddTransactionForm({
             <SelectItem value="INCOME">Income</SelectItem>
           </SelectContent>
         </Select>
-        {errors.type && (
-          <p className="text-sm text-red-500">{errors.type.message}</p>
-        )}
+        {errors.type && <p className="text-sm text-red-500">{errors.type.message}</p>}
       </div>
 
-      {/* Amount and Account */}
+      {/* Amount & Account */}
       <div className="grid gap-6 md:grid-cols-2">
         <div className="space-y-2">
           <label className="text-sm font-medium">Amount</label>
-          <Input
-            type="number"
-            step="0.01"
-            placeholder="0.00"
-            {...register("amount")}
-          />
-          {errors.amount && (
-            <p className="text-sm text-red-500">{errors.amount.message}</p>
-          )}
+          <Input type="number" step="0.01" placeholder="0.00" {...register("amount")} />
+          {errors.amount && <p className="text-sm text-red-500">{errors.amount.message}</p>}
         </div>
 
         <div className="space-y-2">
@@ -180,7 +164,7 @@ export function AddTransactionForm({
             <SelectContent>
               {accounts.map((account) => (
                 <SelectItem key={account.id} value={account.id}>
-                  {account.name} (${parseFloat(account.balance).toFixed(2)})
+                  {account.name} (₹{parseFloat(account.balance).toFixed(2)})
                 </SelectItem>
               ))}
               <CreateAccountDrawer>
@@ -229,10 +213,7 @@ export function AddTransactionForm({
           <PopoverTrigger asChild>
             <Button
               variant="outline"
-              className={cn(
-                "w-full pl-3 text-left font-normal",
-                !date && "text-muted-foreground"
-              )}
+              className={cn("w-full pl-3 text-left font-normal", !date && "text-muted-foreground")}
             >
               {date ? format(date, "PPP") : <span>Pick a date</span>}
               <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -243,28 +224,22 @@ export function AddTransactionForm({
               mode="single"
               selected={date}
               onSelect={(date) => setValue("date", date)}
-              disabled={(date) =>
-                date > new Date() || date < new Date("1900-01-01")
-              }
+              disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
               initialFocus
             />
           </PopoverContent>
         </Popover>
-        {errors.date && (
-          <p className="text-sm text-red-500">{errors.date.message}</p>
-        )}
+        {errors.date && <p className="text-sm text-red-500">{errors.date.message}</p>}
       </div>
 
       {/* Description */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Description</label>
         <Input placeholder="Enter description" {...register("description")} />
-        {errors.description && (
-          <p className="text-sm text-red-500">{errors.description.message}</p>
-        )}
+        {errors.description && <p className="text-sm text-red-500">{errors.description.message}</p>}
       </div>
 
-      {/* Recurring Toggle */}
+      {/* Recurring */}
       <div className="flex flex-row items-center justify-between rounded-lg border p-4">
         <div className="space-y-0.5">
           <label className="text-base font-medium">Recurring Transaction</label>
@@ -278,7 +253,6 @@ export function AddTransactionForm({
         />
       </div>
 
-      {/* Recurring Interval */}
       {isRecurring && (
         <div className="space-y-2">
           <label className="text-sm font-medium">Recurring Interval</label>
@@ -297,21 +271,14 @@ export function AddTransactionForm({
             </SelectContent>
           </Select>
           {errors.recurringInterval && (
-            <p className="text-sm text-red-500">
-              {errors.recurringInterval.message}
-            </p>
+            <p className="text-sm text-red-500">{errors.recurringInterval.message}</p>
           )}
         </div>
       )}
 
       {/* Actions */}
       <div className="flex gap-4">
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          onClick={() => router.back()}
-        >
+        <Button type="button" variant="outline" className="w-full" onClick={() => router.back()}>
           Cancel
         </Button>
         <Button type="submit" className="w-full" disabled={transactionLoading}>
