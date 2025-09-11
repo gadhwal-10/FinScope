@@ -71,11 +71,9 @@ export function NoPaginationTransactionTable({ transactions }) {
   const [recurringFilter, setRecurringFilter] = useState("");
   const router = useRouter();
 
-  // Memoized filtered and sorted transactions
   const filteredAndSortedTransactions = useMemo(() => {
     let result = [...transactions];
 
-    // Apply search filter
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
       result = result.filter((transaction) =>
@@ -83,12 +81,10 @@ export function NoPaginationTransactionTable({ transactions }) {
       );
     }
 
-    // Apply type filter
     if (typeFilter) {
       result = result.filter((transaction) => transaction.type === typeFilter);
     }
 
-    // Apply recurring filter
     if (recurringFilter) {
       result = result.filter((transaction) => {
         if (recurringFilter === "recurring") return transaction.isRecurring;
@@ -96,16 +92,14 @@ export function NoPaginationTransactionTable({ transactions }) {
       });
     }
 
-    // Apply sorting
     result.sort((a, b) => {
       let comparison = 0;
-
       switch (sortConfig.field) {
         case "date":
           comparison = new Date(a.date) - new Date(b.date);
           break;
         case "amount":
-          comparison = a.amount - b.amount;
+          comparison = a.amount - b.amount; // Already in INR
           break;
         case "category":
           comparison = a.category.localeCompare(b.category);
@@ -163,7 +157,7 @@ export function NoPaginationTransactionTable({ transactions }) {
 
   useEffect(() => {
     if (deleted && !deleteLoading) {
-      toast.error("Transactions deleted successfully");
+      toast.success("Transactions deleted successfully"); // Success toast
     }
   }, [deleted, deleteLoading]);
 
@@ -179,7 +173,7 @@ export function NoPaginationTransactionTable({ transactions }) {
       {deleteLoading && (
         <BarLoader className="mt-4" width={"100%"} color="#9333ea" />
       )}
-      {/* Filters */}
+
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -190,6 +184,7 @@ export function NoPaginationTransactionTable({ transactions }) {
             className="pl-8"
           />
         </div>
+
         <div className="flex gap-2">
           <Select value={typeFilter} onValueChange={setTypeFilter}>
             <SelectTrigger>
@@ -216,7 +211,6 @@ export function NoPaginationTransactionTable({ transactions }) {
             </SelectContent>
           </Select>
 
-          {/* Bulk Actions */}
           {selectedIds.length > 0 && (
             <div className="flex items-center gap-2">
               <Button
@@ -243,7 +237,6 @@ export function NoPaginationTransactionTable({ transactions }) {
         </div>
       </div>
 
-      {/* Transactions Table */}
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -262,49 +255,26 @@ export function NoPaginationTransactionTable({ transactions }) {
                 className="cursor-pointer"
                 onClick={() => handleSort("date")}
               >
-                <div className="flex items-center">
-                  Date
-                  {sortConfig.field === "date" &&
-                    (sortConfig.direction === "asc" ? (
-                      <ChevronUp className="ml-1 h-4 w-4" />
-                    ) : (
-                      <ChevronDown className="ml-1 h-4 w-4" />
-                    ))}
-                </div>
+                Date
               </TableHead>
               <TableHead>Description</TableHead>
               <TableHead
                 className="cursor-pointer"
                 onClick={() => handleSort("category")}
               >
-                <div className="flex items-center">
-                  Category
-                  {sortConfig.field === "category" &&
-                    (sortConfig.direction === "asc" ? (
-                      <ChevronUp className="ml-1 h-4 w-4" />
-                    ) : (
-                      <ChevronDown className="ml-1 h-4 w-4" />
-                    ))}
-                </div>
+                Category
               </TableHead>
               <TableHead
                 className="cursor-pointer text-right"
                 onClick={() => handleSort("amount")}
               >
-                <div className="flex items-center justify-end">
-                  Amount
-                  {sortConfig.field === "amount" &&
-                    (sortConfig.direction === "asc" ? (
-                      <ChevronUp className="ml-1 h-4 w-4" />
-                    ) : (
-                      <ChevronDown className="ml-1 h-4 w-4" />
-                    ))}
-                </div>
+                Amount (₹)
               </TableHead>
               <TableHead>Recurring</TableHead>
               <TableHead className="w-[50px]" />
             </TableRow>
           </TableHeader>
+
           <TableBody>
             {filteredAndSortedTransactions.length === 0 ? (
               <TableRow>
@@ -324,10 +294,13 @@ export function NoPaginationTransactionTable({ transactions }) {
                       onCheckedChange={() => handleSelect(transaction.id)}
                     />
                   </TableCell>
+
                   <TableCell>
                     {format(new Date(transaction.date), "PP")}
                   </TableCell>
+
                   <TableCell>{transaction.description}</TableCell>
+
                   <TableCell className="capitalize">
                     <span
                       style={{
@@ -338,6 +311,7 @@ export function NoPaginationTransactionTable({ transactions }) {
                       {transaction.category}
                     </span>
                   </TableCell>
+
                   <TableCell
                     className={cn(
                       "text-right font-medium",
@@ -346,9 +320,10 @@ export function NoPaginationTransactionTable({ transactions }) {
                         : "text-green-500"
                     )}
                   >
-                    {transaction.type === "EXPENSE" ? "-" : "+"}$
-                    {transaction.amount.toFixed(2)}
+                    {transaction.type === "EXPENSE" ? "-" : "+"}₹
+                    {transaction.amount.toFixed(2)} {/* Direct INR */}
                   </TableCell>
+
                   <TableCell>
                     {transaction.isRecurring ? (
                       <TooltipProvider>
@@ -359,11 +334,7 @@ export function NoPaginationTransactionTable({ transactions }) {
                               className="gap-1 bg-purple-100 text-purple-700 hover:bg-purple-200"
                             >
                               <RefreshCw className="h-3 w-3" />
-                              {
-                                RECURRING_INTERVALS[
-                                  transaction.recurringInterval
-                                ]
-                              }
+                              {RECURRING_INTERVALS[transaction.recurringInterval]}
                             </Badge>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -386,6 +357,7 @@ export function NoPaginationTransactionTable({ transactions }) {
                       </Badge>
                     )}
                   </TableCell>
+
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -393,6 +365,7 @@ export function NoPaginationTransactionTable({ transactions }) {
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
+
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem
                           onClick={() =>
@@ -403,7 +376,9 @@ export function NoPaginationTransactionTable({ transactions }) {
                         >
                           Edit
                         </DropdownMenuItem>
+
                         <DropdownMenuSeparator />
+
                         <DropdownMenuItem
                           className="text-destructive"
                           onClick={() => deleteFn([transaction.id])}
