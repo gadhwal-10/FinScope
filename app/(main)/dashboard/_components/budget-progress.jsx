@@ -103,9 +103,7 @@ export function BudgetProgress({ initialBudget, currentExpenses }) {
               <>
                 <CardDescription>
                   {initialBudget
-                    ? `$${currentExpenses.toFixed(
-                        2
-                      )} of $${initialBudget.amount.toFixed(2)} spent`
+                    ? `₹${currentExpenses.toFixed(2)} of ₹${initialBudget.amount.toFixed(2)} spent`
                     : "No budget set"}
                 </CardDescription>
                 <Button
@@ -125,15 +123,15 @@ export function BudgetProgress({ initialBudget, currentExpenses }) {
         {initialBudget && (
           <div className="space-y-2">
             <Progress
-  value={percentUsed}
-  className={
-    percentUsed >= 90
-      ? "bg-red-500"
-      : percentUsed >= 75
-        ? "bg-yellow-500"
-        : "bg-green-500"
-  }
-/>
+              value={percentUsed}
+              className={
+                percentUsed >= 90
+                  ? "bg-red-500"
+                  : percentUsed >= 75
+                  ? "bg-yellow-500"
+                  : "bg-green-500"
+              }
+            />
             <p className="text-xs text-muted-foreground text-right">
               {percentUsed.toFixed(1)}% used
             </p>
