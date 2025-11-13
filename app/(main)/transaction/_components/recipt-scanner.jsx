@@ -14,41 +14,26 @@ export function ReceiptScanner({ onScanComplete }) {
     loading: scanReceiptLoading,
     fn: scanReceiptFn,
     data: scannedData,
-    error,
   } = useFetch(scanReceipt);
 
   const handleReceiptScan = async (file) => {
-    if (!file) return;
-
     if (file.size > 5 * 1024 * 1024) {
-      toast.error("File size should be less than 5MB");
+      toast.error("File must be <5MB");
       return;
     }
 
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
+    const fd = new FormData();
+    fd.append("file", file);
 
-      await scanReceiptFn(formData);
-    } catch {
-      toast.error("Failed to start scanning");
-    }
+    await scanReceiptFn(fd);
   };
 
-  // When scanning returns results
   useEffect(() => {
-    if (!scanReceiptLoading && scannedData) {
+    if (scannedData && !scanReceiptLoading) {
       onScanComplete(scannedData);
-      toast.success("Receipt scanned successfully!");
+      toast.success("Receipt scanned!");
     }
-  }, [scanReceiptLoading, scannedData, onScanComplete]);
-
-  // Handle scanning server errors
-  useEffect(() => {
-    if (error) {
-      toast.error("Failed to scan receipt. Try again.");
-    }
-  }, [error]);
+  }, [scanReceiptLoading, scannedData]);
 
   return (
     <div className="flex items-center gap-4">
@@ -58,25 +43,28 @@ export function ReceiptScanner({ onScanComplete }) {
         className="hidden"
         accept="image/*"
         capture="environment"
-        onChange={(e) => handleReceiptScan(e.target.files?.[0])}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleReceiptScan(file);
+        }}
       />
 
       <Button
         type="button"
         variant="outline"
-        className="w-full h-10 bg-gradient-to-br from-orange-500 via-pink-500 to-purple-500 animate-gradient hover:opacity-90 transition-opacity text-white hover:text-white"
-        onClick={() => fileInputRef.current?.click()}
         disabled={scanReceiptLoading}
+        onClick={() => fileInputRef.current?.click()}
+        className="w-full h-10 bg-gradient-to-br from-orange-500 via-pink-500 to-purple-500 text-white"
       >
         {scanReceiptLoading ? (
           <>
             <Loader2 className="mr-2 animate-spin" />
-            <span>Scanning Receipt...</span>
+            Scanning...
           </>
         ) : (
           <>
             <Camera className="mr-2" />
-            <span>Scan Receipt with AI</span>
+            Scan Receipt with AI
           </>
         )}
       </Button>
