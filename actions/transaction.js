@@ -1,3 +1,6 @@
+// transaction.js
+export const runtime = "nodejs"; // ensure Node runtime (not Edge)
+
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
@@ -7,7 +10,19 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import aj from "@/lib/arcjet";
 import { request } from "@arcjet/next";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+/**
+ * Defensive: ensure GEMINI API key exists before creating client.
+ * Create client lazily inside functions so we can early-fail with a clear message.
+ */
+const makeGenAI = () => {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    throw new Error(
+      "GEMINI_API_KEY is not set. Set process.env.GEMINI_API_KEY and restart the server."
+    );
+  }
+  return new GoogleGenerativeAI(key);
+};
 
 const serializeAmount = (obj) => ({
   ...obj,
@@ -28,13 +43,12 @@ export async function createTransaction(data) {
     });
 
     if (decision.isDenied()) {
-      if (decision.reason.isRateLimit()) {
+      if (decision.reason.isRateLimit && decision.reason.isRateLimit()) {
         const { remaining, reset } = decision.reason;
         console.error({
           code: "RATE_LIMIT_EXCEEDED",
           details: { remaining, resetInSeconds: reset },
         });
-
         throw new Error("Too many requests. Please try again later.");
       }
 
@@ -84,27 +98,34 @@ export async function createTransaction(data) {
 
     return { success: true, data: serializeAmount(transaction) };
   } catch (error) {
-    throw new Error(error.message);
+    console.error("createTransaction error:", error);
+    // keep the thrown message simple for client, but log full error server-side
+    throw new Error(error?.message || "Failed to create transaction");
   }
 }
 
 export async function getTransaction(id) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  try {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
 
-  const user = await db.user.findUnique({
-    where: { clerkUserId: userId },
-  });
+    const user = await db.user.findUnique({
+      where: { clerkUserId: userId },
+    });
 
-  if (!user) throw new Error("User not found");
+    if (!user) throw new Error("User not found");
 
-  const transaction = await db.transaction.findUnique({
-    where: { id, userId: user.id },
-  });
+    const transaction = await db.transaction.findUnique({
+      where: { id, userId: user.id },
+    });
 
-  if (!transaction) throw new Error("Transaction not found");
+    if (!transaction) throw new Error("Transaction not found");
 
-  return serializeAmount(transaction);
+    return serializeAmount(transaction);
+  } catch (error) {
+    console.error("getTransaction error:", error);
+    throw new Error(error?.message || "Failed to get transaction");
+  }
 }
 
 export async function updateTransaction(id, data) {
@@ -130,8 +151,7 @@ export async function updateTransaction(id, data) {
         ? -originalTransaction.amount.toNumber()
         : originalTransaction.amount.toNumber();
 
-    const newBalanceChange =
-      data.type === "EXPENSE" ? -data.amount : data.amount;
+    const newBalanceChange = data.type === "EXPENSE" ? -data.amount : data.amount;
 
     const netBalanceChange = newBalanceChange - oldBalanceChange;
 
@@ -162,7 +182,8 @@ export async function updateTransaction(id, data) {
 
     return { success: true, data: serializeAmount(transaction) };
   } catch (error) {
-    throw new Error(error.message);
+    console.error("updateTransaction error:", error);
+    throw new Error(error?.message || "Failed to update transaction");
   }
 }
 
@@ -186,27 +207,55 @@ export async function getUserTransactions(query = {}) {
 
     return { success: true, data: transactions };
   } catch (error) {
-    throw new Error(error.message);
+    console.error("getUserTransactions error:", error);
+    throw new Error(error?.message || "Failed to fetch user transactions");
   }
 }
 
 //
-// ---------------------------------------------------------
-// FIXED: SCAN RECEIPT — ACCEPTS FORMDATA (NOT FILE DIRECTLY)
-// ---------------------------------------------------------
+// ------------------------------
+// FIXED & DEFENSIVE SCAN RECEIPT
+// ------------------------------
+// Accepts FormData (formData.get("file"))
 //
 export async function scanReceipt(formData) {
   try {
-    const file = formData.get("file");
+    // Validate FormData
+    if (!formData || typeof formData.get !== "function") {
+      throw new Error("scanReceipt expects FormData");
+    }
 
+    const file = formData.get("file");
     if (!file) {
       throw new Error("No file uploaded");
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // Create Gemini client safely (throws clear error if key missing)
+    let genAI;
+    try {
+      genAI = makeGenAI();
+    } catch (err) {
+      console.error("Gemini client initialization error:", err);
+      throw new Error("Server misconfiguration: missing GEMINI_API_KEY");
+    }
 
+    // Ensure Buffer is available (Edge runtime could lack it)
+    let NodeBuffer = globalThis?.Buffer;
+    if (!NodeBuffer) {
+      try {
+        const { Buffer: ImportedBuffer } = await import("buffer");
+        NodeBuffer = ImportedBuffer;
+      } catch (bufErr) {
+        console.error("Buffer import failed:", bufErr);
+        throw new Error("Buffer is not available in this runtime");
+      }
+    }
+
+    // Convert file to base64
     const arrayBuffer = await file.arrayBuffer();
-    const base64String = Buffer.from(arrayBuffer).toString("base64");
+    const base64String = NodeBuffer.from(arrayBuffer).toString("base64");
+
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
       Analyze this receipt image and extract the following information in JSON format:
@@ -230,7 +279,7 @@ export async function scanReceipt(formData) {
       {
         inlineData: {
           data: base64String,
-          mimeType: file.type,
+          mimeType: file.type || "image/jpeg",
         },
       },
       prompt,
@@ -245,20 +294,22 @@ export async function scanReceipt(formData) {
     try {
       data = JSON.parse(cleanedText);
     } catch (err) {
-      console.error("Gemini JSON Parse Error:", err);
+      console.error("Gemini JSON Parse Error. Raw response:", cleanedText, err);
       throw new Error("Invalid JSON response from Gemini");
     }
 
     return {
-      amount: parseFloat(data.amount),
+      amount: typeof data.amount === "number" ? data.amount : parseFloat(data.amount) || 0,
       date: data.date ? new Date(data.date) : new Date(),
       description: data.description || "No Description",
       category: data.category || "Misc",
       merchantName: data.merchantName || "Unknown",
     };
   } catch (error) {
-    console.error("Scan Receipt Error:", error);
-    throw new Error("Failed to scan receipt");
+    // log full error on server for debugging
+    console.error("scanReceipt error:", error);
+    // throw a concise error message to the client (digest still will appear in prod, but terminal has details)
+    throw new Error(error?.message || "Failed to scan receipt");
   }
 }
 
