@@ -14,23 +14,41 @@ export function ReceiptScanner({ onScanComplete }) {
     loading: scanReceiptLoading,
     fn: scanReceiptFn,
     data: scannedData,
+    error,
   } = useFetch(scanReceipt);
 
   const handleReceiptScan = async (file) => {
+    if (!file) return;
+
     if (file.size > 5 * 1024 * 1024) {
       toast.error("File size should be less than 5MB");
       return;
     }
 
-    await scanReceiptFn(file);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      await scanReceiptFn(formData);
+    } catch {
+      toast.error("Failed to start scanning");
+    }
   };
 
+  // When scanning returns results
   useEffect(() => {
-    if (scannedData && !scanReceiptLoading) {
+    if (!scanReceiptLoading && scannedData) {
       onScanComplete(scannedData);
-      toast.success("Receipt scanned successfully");
+      toast.success("Receipt scanned successfully!");
     }
-  }, [scanReceiptLoading, scannedData]);
+  }, [scanReceiptLoading, scannedData, onScanComplete]);
+
+  // Handle scanning server errors
+  useEffect(() => {
+    if (error) {
+      toast.error("Failed to scan receipt. Try again.");
+    }
+  }, [error]);
 
   return (
     <div className="flex items-center gap-4">
@@ -40,11 +58,9 @@ export function ReceiptScanner({ onScanComplete }) {
         className="hidden"
         accept="image/*"
         capture="environment"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleReceiptScan(file);
-        }}
+        onChange={(e) => handleReceiptScan(e.target.files?.[0])}
       />
+
       <Button
         type="button"
         variant="outline"
