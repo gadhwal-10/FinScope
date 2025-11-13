@@ -22,24 +22,12 @@ export function ReceiptScanner({ onScanComplete }) {
       return;
     }
 
-    // IMPORTANT FIX — send FormData, not File
-    const formData = new FormData();
-    formData.append("file", file);
-
-    await scanReceiptFn(formData);
+    await scanReceiptFn(file);
   };
 
   useEffect(() => {
     if (scannedData && !scanReceiptLoading) {
-      const newTransaction = {
-        title: scannedData.itemName || "Untitled Transaction",
-        amount: Number(scannedData.amount) || 0,
-        category: scannedData.category || "Misc",
-        type: "expense",
-        date: scannedData.date ? new Date(scannedData.date) : new Date(),
-      };
-
-      onScanComplete(newTransaction);
+      onScanComplete(scannedData);
       toast.success("Receipt scanned successfully");
     }
   }, [scanReceiptLoading, scannedData]);
