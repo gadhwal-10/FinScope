@@ -7,15 +7,15 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import aj from "@/lib/arcjet";
 import { request } from "@arcjet/next";
 
-// Convert Prisma Decimal → Number
+// Convert Prisma Decimal to number
 const serializeAmount = (obj) => ({
   ...obj,
   amount: obj.amount.toNumber(),
 });
 
-/* ============================================================
+/* ------------------------------------------------
    CREATE TRANSACTION
-============================================================ */
+------------------------------------------------ */
 export async function createTransaction(data) {
   try {
     const { userId } = await auth();
@@ -24,7 +24,9 @@ export async function createTransaction(data) {
     const req = await request();
     await aj.protect(req, { userId, requested: 1 });
 
-    const user = await db.user.findUnique({ where: { clerkUserId: userId } });
+    const user = await db.user.findUnique({
+      where: { clerkUserId: userId },
+    });
     if (!user) throw new Error("User not found");
 
     const account = await db.account.findUnique({
@@ -59,9 +61,9 @@ export async function createTransaction(data) {
   }
 }
 
-/* ============================================================
-   GET ONE TRANSACTION
-============================================================ */
+/* ------------------------------------------------
+   GET TRANSACTION
+------------------------------------------------ */
 export async function getTransaction(id) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
@@ -77,15 +79,17 @@ export async function getTransaction(id) {
   return serializeAmount(tx);
 }
 
-/* ============================================================
+/* ------------------------------------------------
    UPDATE TRANSACTION
-============================================================ */
+------------------------------------------------ */
 export async function updateTransaction(id, data) {
   try {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({ where: { clerkUserId: userId } });
+    const user = await db.user.findUnique({
+      where: { clerkUserId: userId },
+    });
     if (!user) throw new Error("User not found");
 
     const original = await db.transaction.findUnique({
@@ -127,15 +131,17 @@ export async function updateTransaction(id, data) {
   }
 }
 
-/* ============================================================
-   GET ALL USER TRANSACTIONS
-============================================================ */
+/* ------------------------------------------------
+   GET USER TRANSACTIONS
+------------------------------------------------ */
 export async function getUserTransactions(query = {}) {
   try {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({ where: { clerkUserId: userId } });
+    const user = await db.user.findUnique({
+      where: { clerkUserId: userId },
+    });
     if (!user) throw new Error("User not found");
 
     const txs = await db.transaction.findMany({
@@ -150,31 +156,39 @@ export async function getUserTransactions(query = {}) {
   }
 }
 
-/* ============================================================
-   SCAN RECEIPT — GEMINI 1.5 FLASH (FINAL)
-============================================================ */
+/* ------------------------------------------------
+   SCAN RECEIPT (GEMINI AI) — UPDATED & WORKING
+------------------------------------------------ */
 export async function scanReceipt(formData) {
+  console.log("📌 SCAN RECEIPT STARTED");
+
   try {
     const file = formData.get("file");
+    console.log("📌 Extracted file:", file);
+
     if (!file) throw new Error("No file uploaded");
 
-    // Convert file → base64
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const base64 = buffer.toString("base64");
+    // Convert file → buffer → base64
+    const arrayBuffer = await file.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
 
-    if (!process.env.GEMINI_API_KEY)
+    console.log("📌 Base64 size:", base64.length);
+
+    // Check API key
+    if (!process.env.GEMINI_API_KEY) {
       throw new Error("Missing GEMINI_API_KEY");
+    }
 
+    console.log("📌 Initializing Gemini client...");
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-    // ✔ Correct model (latest)
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-    });
+    // FIXED MODEL NAME ❗
+ const model = genAI.getGenerativeModel({
+  model: "gemini-2.0-flash",
+});
 
     const prompt = `
-      Extract structured data from this receipt image. 
-      Return ONLY valid JSON:
+      Read this receipt image and return JSON:
       {
         "amount": number,
         "date": "ISO string",
@@ -183,6 +197,8 @@ export async function scanReceipt(formData) {
         "category": "string"
       }
     `;
+
+    console.log("📌 Sending request to Gemini...");
 
     const result = await model.generateContent([
       {
@@ -195,14 +211,19 @@ export async function scanReceipt(formData) {
     ]);
 
     const text = result.response.text();
+    console.log("📌 Raw output:", text);
+
     const clean = text.replace(/```json|```/g, "").trim();
 
     let parsed;
     try {
       parsed = JSON.parse(clean);
-    } catch {
-      throw new Error("Invalid JSON returned by Gemini");
+    } catch (err) {
+      console.error("❌ JSON parse error:", err);
+      throw new Error("Invalid JSON from Gemini");
     }
+
+    console.log("📌 Parsed data:", parsed);
 
     return {
       amount: Number(parsed.amount) || 0,
@@ -212,14 +233,16 @@ export async function scanReceipt(formData) {
       category: parsed.category || "Misc",
     };
   } catch (err) {
-    console.error("Scan Receipt Error:", err);
+    console.error("🔥 FULL SCAN RECEIPT ERROR BELOW");
+    console.error(err);
+    console.error("🔥 END ERROR");
     throw new Error("Failed to scan receipt");
   }
 }
 
-/* ============================================================
-   RECURRING DATE HELPER
-============================================================ */
+/* ------------------------------------------------
+   HELPER — NEXT RECURRING DATE
+------------------------------------------------ */
 function calculateNextRecurringDate(startDate, interval) {
   const d = new Date(startDate);
 
