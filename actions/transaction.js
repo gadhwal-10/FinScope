@@ -7,179 +7,112 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import aj from "@/lib/arcjet";
 import { request } from "@arcjet/next";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
+// Convert Prisma Decimal → Number
 const serializeAmount = (obj) => ({
   ...obj,
   amount: obj.amount.toNumber(),
 });
 
-// Create Transaction
+/* ============================================================
+   CREATE TRANSACTION
+============================================================ */
 export async function createTransaction(data) {
   try {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    // Get request data for ArcJet
     const req = await request();
+    await aj.protect(req, { userId, requested: 1 });
 
-    // Check rate limit
-    const decision = await aj.protect(req, {
-      userId,
-      requested: 1, // Specify how many tokens to consume
-    });
-
-    if (decision.isDenied()) {
-      if (decision.reason.isRateLimit()) {
-        const { remaining, reset } = decision.reason;
-        console.error({
-          code: "RATE_LIMIT_EXCEEDED",
-          details: {
-            remaining,
-            resetInSeconds: reset,
-          },
-        });
-
-        throw new Error("Too many requests. Please try again later.");
-      }
-
-      throw new Error("Request blocked");
-    }
-
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+    const user = await db.user.findUnique({ where: { clerkUserId: userId } });
+    if (!user) throw new Error("User not found");
 
     const account = await db.account.findUnique({
-      where: {
-        id: data.accountId,
-        userId: user.id,
-      },
+      where: { id: data.accountId, userId: user.id },
     });
+    if (!account) throw new Error("Account not found");
 
-    if (!account) {
-      throw new Error("Account not found");
-    }
+    const balanceChange =
+      data.type === "EXPENSE" ? -data.amount : data.amount;
 
-    // Calculate new balance
-    const balanceChange = data.type === "EXPENSE" ? -data.amount : data.amount;
     const newBalance = account.balance.toNumber() + balanceChange;
 
-    // Create transaction and update account balance
-    const transaction = await db.$transaction(async (tx) => {
-      const newTransaction = await tx.transaction.create({
-        data: {
-          ...data,
-          userId: user.id,
-          nextRecurringDate:
-            data.isRecurring && data.recurringInterval
-              ? calculateNextRecurringDate(data.date, data.recurringInterval)
-              : null,
-        },
+    const tx = await db.$transaction(async (trx) => {
+      const newTx = await trx.transaction.create({
+        data: { ...data, userId: user.id },
       });
 
-      await tx.account.update({
+      await trx.account.update({
         where: { id: data.accountId },
         data: { balance: newBalance },
       });
 
-      return newTransaction;
+      return newTx;
     });
 
     revalidatePath("/dashboard");
-    revalidatePath(`/account/${transaction.accountId}`);
+    revalidatePath(`/account/${tx.accountId}`);
 
-    return { success: true, data: serializeAmount(transaction) };
-  } catch (error) {
-    throw new Error(error.message);
+    return { success: true, data: serializeAmount(tx) };
+  } catch (err) {
+    throw new Error(err.message);
   }
 }
 
+/* ============================================================
+   GET ONE TRANSACTION
+============================================================ */
 export async function getTransaction(id) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
 
-  const user = await db.user.findUnique({
-    where: { clerkUserId: userId },
-  });
-
+  const user = await db.user.findUnique({ where: { clerkUserId: userId } });
   if (!user) throw new Error("User not found");
 
-  const transaction = await db.transaction.findUnique({
-    where: {
-      id,
-      userId: user.id,
-    },
+  const tx = await db.transaction.findUnique({
+    where: { id, userId: user.id },
   });
+  if (!tx) throw new Error("Transaction not found");
 
-  if (!transaction) throw new Error("Transaction not found");
-
-  return serializeAmount(transaction);
+  return serializeAmount(tx);
 }
 
+/* ============================================================
+   UPDATE TRANSACTION
+============================================================ */
 export async function updateTransaction(id, data) {
   try {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
+    const user = await db.user.findUnique({ where: { clerkUserId: userId } });
     if (!user) throw new Error("User not found");
 
-    // Get original transaction to calculate balance change
-    const originalTransaction = await db.transaction.findUnique({
-      where: {
-        id,
-        userId: user.id,
-      },
-      include: {
-        account: true,
-      },
+    const original = await db.transaction.findUnique({
+      where: { id, userId: user.id },
+      include: { account: true },
     });
+    if (!original) throw new Error("Transaction not found");
 
-    if (!originalTransaction) throw new Error("Transaction not found");
+    const oldChange =
+      original.type === "EXPENSE"
+        ? -original.amount.toNumber()
+        : original.amount.toNumber();
 
-    // Calculate balance changes
-    const oldBalanceChange =
-      originalTransaction.type === "EXPENSE"
-        ? -originalTransaction.amount.toNumber()
-        : originalTransaction.amount.toNumber();
-
-    const newBalanceChange =
+    const newChange =
       data.type === "EXPENSE" ? -data.amount : data.amount;
 
-    const netBalanceChange = newBalanceChange - oldBalanceChange;
+    const net = newChange - oldChange;
 
-    // Update transaction and account balance in a transaction
-    const transaction = await db.$transaction(async (tx) => {
-      const updated = await tx.transaction.update({
-        where: {
-          id,
-          userId: user.id,
-        },
-        data: {
-          ...data,
-          nextRecurringDate:
-            data.isRecurring && data.recurringInterval
-              ? calculateNextRecurringDate(data.date, data.recurringInterval)
-              : null,
-        },
+    const tx = await db.$transaction(async (trx) => {
+      const updated = await trx.transaction.update({
+        where: { id, userId: user.id },
+        data,
       });
 
-      // Update account balance
-      await tx.account.update({
+      await trx.account.update({
         where: { id: data.accountId },
-        data: {
-          balance: {
-            increment: netBalanceChange,
-          },
-        },
+        data: { balance: { increment: net } },
       });
 
       return updated;
@@ -188,126 +121,112 @@ export async function updateTransaction(id, data) {
     revalidatePath("/dashboard");
     revalidatePath(`/account/${data.accountId}`);
 
-    return { success: true, data: serializeAmount(transaction) };
-  } catch (error) {
-    throw new Error(error.message);
+    return { success: true, data: serializeAmount(tx) };
+  } catch (err) {
+    throw new Error(err.message);
   }
 }
 
-// Get User Transactions
+/* ============================================================
+   GET ALL USER TRANSACTIONS
+============================================================ */
 export async function getUserTransactions(query = {}) {
   try {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
+    const user = await db.user.findUnique({ where: { clerkUserId: userId } });
+    if (!user) throw new Error("User not found");
+
+    const txs = await db.transaction.findMany({
+      where: { userId: user.id, ...query },
+      include: { account: true },
+      orderBy: { date: "desc" },
     });
 
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    const transactions = await db.transaction.findMany({
-      where: {
-        userId: user.id,
-        ...query,
-      },
-      include: {
-        account: true,
-      },
-      orderBy: {
-        date: "desc",
-      },
-    });
-
-    return { success: true, data: transactions };
-  } catch (error) {
-    throw new Error(error.message);
+    return { success: true, data: txs };
+  } catch (err) {
+    throw new Error(err.message);
   }
 }
 
-// Scan Receipt
-export async function scanReceipt(file) {
+/* ============================================================
+   SCAN RECEIPT — GEMINI 1.5 FLASH (FINAL)
+============================================================ */
+export async function scanReceipt(formData) {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const file = formData.get("file");
+    if (!file) throw new Error("No file uploaded");
 
-    // Convert File to ArrayBuffer
-    const arrayBuffer = await file.arrayBuffer();
-    // Convert ArrayBuffer to Base64
-    const base64String = Buffer.from(arrayBuffer).toString("base64");
+    // Convert file → base64
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const base64 = buffer.toString("base64");
+
+    if (!process.env.GEMINI_API_KEY)
+      throw new Error("Missing GEMINI_API_KEY");
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+    // ✔ Correct model (latest)
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+    });
 
     const prompt = `
-      Analyze this receipt image and extract the following information in JSON format:
-      - Total amount (just the number)
-      - Date (in ISO format)
-      - Description or items purchased (brief summary)
-      - Merchant/store name
-      - Suggested category (one of: housing,transportation,groceries,utilities,entertainment,food,shopping,healthcare,education,personal,travel,insurance,gifts,bills,other-expense )
-      
-      Only respond with valid JSON in this exact format:
+      Extract structured data from this receipt image. 
+      Return ONLY valid JSON:
       {
         "amount": number,
-        "date": "ISO date string",
+        "date": "ISO string",
         "description": "string",
         "merchantName": "string",
         "category": "string"
       }
-
-      If its not a recipt, return an empty object
     `;
 
     const result = await model.generateContent([
       {
         inlineData: {
-          data: base64String,
-          mimeType: file.type,
+          data: base64,
+          mimeType: file.type || "image/jpeg",
         },
       },
       prompt,
     ]);
 
-    const response = await result.response;
-    const text = response.text();
-    const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
+    const text = result.response.text();
+    const clean = text.replace(/```json|```/g, "").trim();
 
+    let parsed;
     try {
-      const data = JSON.parse(cleanedText);
-      return {
-        amount: parseFloat(data.amount),
-        date: new Date(data.date),
-        description: data.description,
-        category: data.category,
-        merchantName: data.merchantName,
-      };
-    } catch (parseError) {
-      console.error("Error parsing JSON response:", parseError);
-      throw new Error("Invalid response format from Gemini");
+      parsed = JSON.parse(clean);
+    } catch {
+      throw new Error("Invalid JSON returned by Gemini");
     }
-  } catch (error) {
-    console.error("Error scanning receipt:", error);
+
+    return {
+      amount: Number(parsed.amount) || 0,
+      date: parsed.date || new Date().toISOString(),
+      description: parsed.description || "No Description",
+      merchantName: parsed.merchantName || "Unknown",
+      category: parsed.category || "Misc",
+    };
+  } catch (err) {
+    console.error("Scan Receipt Error:", err);
     throw new Error("Failed to scan receipt");
   }
 }
 
-// Helper function to calculate next recurring date
+/* ============================================================
+   RECURRING DATE HELPER
+============================================================ */
 function calculateNextRecurringDate(startDate, interval) {
-  const date = new Date(startDate);
+  const d = new Date(startDate);
 
-  switch (interval) {
-    case "DAILY":
-      date.setDate(date.getDate() + 1);
-      break;
-    case "WEEKLY":
-      date.setDate(date.getDate() + 7);
-      break;
-    case "MONTHLY":
-      date.setMonth(date.getMonth() + 1);
-      break;
-    case "YEARLY":
-      date.setFullYear(date.getFullYear() + 1);
-      break;
-  }
+  if (interval === "DAILY") d.setDate(d.getDate() + 1);
+  if (interval === "WEEKLY") d.setDate(d.getDate() + 7);
+  if (interval === "MONTHLY") d.setMonth(d.getMonth() + 1);
+  if (interval === "YEARLY") d.setFullYear(d.getFullYear() + 1);
 
-  return date;
+  return d;
 }
