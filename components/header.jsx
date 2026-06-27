@@ -21,7 +21,7 @@ const Header = async () => {
             alt="FinScope Logo"
             width={800}
             height={200}
-            className="h-27 w-auto object-contain"
+            className="h-12 md:h-14 w-auto object-contain"
           />
         </Link>
 
