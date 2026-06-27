@@ -58,10 +58,10 @@ const HeroSection = () => {
           <div ref={imageRef} className="hero-image">
             <Image
               src="/banner.jpg"
-              width={3000}
-              height={200}
+              width={1400}
+              height={800}
               alt="Dashboard Preview"
-              className="rounded-lg shadow-2xl border border-slate-700/50 mx-auto hover:shadow-blue-500/20 transition-shadow duration-500"
+              className="w-full h-auto max-w-6xl rounded-lg shadow-2xl border border-slate-700/50 mx-auto hover:shadow-blue-500/20 transition-shadow duration-500"
               priority
             />
           </div>
